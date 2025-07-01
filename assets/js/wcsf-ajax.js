@@ -65,11 +65,21 @@ jQuery(function ($) {
     // buildUrlForPage Function (now supports brands too!) ------------
     function buildUrlForPage(page) {
       const url = new URL(window.location.href);
-    
+
+      // Helper to remove any variations of an array-like key
+      const deleteParams = key => {
+        const base = key.replace('[]', '[');
+        for (const k of Array.from(url.searchParams.keys())) {
+          if (k === key || k.startsWith(base)) {
+            url.searchParams.delete(k);
+          }
+        }
+      };
+
       // 1) strip existing /page/X/ and old params…
       url.pathname = url.pathname.replace(/\/page\/\d+(?=\/|$)/g, '');
       ['cats[]','brands[]','tags[]','min_rating','min_price','max_price','search','product-page']
-        .forEach(p => url.searchParams.delete(p));
+        .forEach(deleteParams);
     
       // 2) re‐append cats, brands, tags as before…
       $('.wc-filter-form input[name="cats[]"]:checked').each(function(){
@@ -106,9 +116,7 @@ jQuery(function ($) {
       // ——— Attributes ———
       if ( Array.isArray(wcsfAjax.attributeTaxonomies) ) {
         wcsfAjax.attributeTaxonomies.forEach(function(tax){
-          // clear any old values
-          url.searchParams.delete(tax + '[]');
-          // add each checked attribute term
+          deleteParams(tax + '[]');
           $(`.wc-filter-form input[name="${tax}[]"]:checked`).each(function(){
             url.searchParams.append(tax + '[]', this.value);
           });
@@ -289,6 +297,17 @@ jQuery(function ($) {
 
   function renderFilterTagsFromURL() {
     const urlParams = new URLSearchParams(window.location.search);
+
+    const getParamValues = name => {
+      const base = name.replace('[]', '[');
+      const vals = new Set();
+      urlParams.forEach((v, k) => {
+        if (k === name || k.startsWith(base)) {
+          vals.add(v);
+        }
+      });
+      return Array.from(vals);
+    };
   
     // 1) Reset all filters in the form
     $('.wc-filter-form')[0]?.reset();
@@ -300,15 +319,22 @@ jQuery(function ($) {
     }
   
     // 2) Re-check checkboxes & re-fill single-value controls
-    urlParams.getAll('cats[]').forEach(v => {
+    getParamValues('cats[]').forEach(v => {
       $(`input[name="cats[]"][value="${v}"]`).prop('checked', true);
     });
-    urlParams.getAll('brands[]').forEach(v => {
+    getParamValues('brands[]').forEach(v => {
       $(`input[name="brands[]"][value="${v}"]`).prop('checked', true);
     });
-    urlParams.getAll('tags[]').forEach(v => {
+    getParamValues('tags[]').forEach(v => {
       $(`input[name="tags[]"][value="${v}"]`).prop('checked', true);
     });
+    if ( Array.isArray(wcsfAjax.attributeTaxonomies) ) {
+      wcsfAjax.attributeTaxonomies.forEach(function(tax){
+        getParamValues(tax + '[]').forEach(v => {
+          $(`input[name="${tax}[]"][value="${v}"]`).prop('checked', true);
+        });
+      });
+    }
     if ( urlParams.has('min_rating') ) {
       $('select[name="min_rating"]').val(urlParams.get('min_rating'));
     }
