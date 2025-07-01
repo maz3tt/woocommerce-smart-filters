@@ -1,0 +1,87 @@
+/* ------------------------------------------------------------------------
+   Mobile toolbar (only on <768px)
+   ------------------------------------------------------------------------ */
+   .wcsf-mobile-toolbar {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #fff;
+    padding: .5rem;
+    border-top: 1px solid #ddd;
+    z-index: 9999;
+    text-align: center;
+  }
+
+
+  @media (max-width: 767.98px) {
+    .wcsf-sidebar { display: none !important; }
+  }
+  .wcsf-mobile-toolbar button {
+    background: #007cba;
+    color: #fff;
+    border: none;
+    padding: .5rem 1rem;
+    font-size: 1rem;
+    border-radius: 4px;
+  }
+
+ 
+  
+  /* ------------------------------------------------------------------------
+     Off-canvas overlay & panel
+     ------------------------------------------------------------------------ */
+  .wcsf-offcanvas-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,.5);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .3s ease, visibility .3s ease;
+    z-index: 9998;
+  }
+  
+  .wcsf-offcanvas-panel {
+    position: fixed;
+    top: 0; bottom: 0;
+    left: -100%;
+    width: 80%;
+    max-width: 320px;
+    background: #fff;
+    overflow-y: auto;
+    transition: left .3s ease;
+    z-index: 9999;
+    padding: 1.5rem 1rem;
+  }
+  
+  /* Close button in panel */
+  .wcsf-offcanvas-close {
+    position: absolute;
+    top: .5rem;
+    right: .5rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+  
+  /* When active */
+  body.wcsf-offcanvas-open .wcsf-offcanvas-overlay {
+    opacity: 1;
+    visibility: visible;
+  }
+  
+  body.wcsf-offcanvas-open .wcsf-offcanvas-panel {
+    left: 0;
+  }
+
+
+  
+  /* show only on mobile */
+  @media (max-width: 767.98px) {
+    .wcsf-mobile-toolbar { display: block; }
+    .wcsf-offcanvas-panel { display: block; }
+  }
+  

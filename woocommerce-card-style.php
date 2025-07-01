@@ -22,8 +22,13 @@ add_action( 'wp_enqueue_scripts', function () {
     );
 
     wp_localize_script( 'wcsf-ajax', 'wcsfAjax', [
-        'url'   => admin_url( 'admin-ajax.php' ),
-        'nonce' => wp_create_nonce( 'wcsf_filter' ),
+        'url'                 => admin_url( 'admin-ajax.php' ),
+        'nonce'               => wp_create_nonce( 'wcsf_filter' ),
+        'attributeTaxonomies' => (array) get_option( 'wcsf_attribute_filter_list', [] ),
+        'priceDefaults' => [
+            'min' => floatval( get_option( 'wcsf_price_filter_min', 0 ) ),
+            'max' => floatval( get_option( 'wcsf_price_filter_max', 1000 ) ),
+        ],
     ] );
 
 	// Google Font (optional)
@@ -60,6 +65,24 @@ add_action( 'wp_enqueue_scripts', function () {
 		[ 'wcsf-bootstrap' ],
 		'1.2.4'
 	);
+
+    // CSS file
+    wp_enqueue_style(
+        'wcsf-offcanvas',
+        plugins_url( 'assets/css/wcsf-offcanvas.css', __FILE__ ),
+        [ 'wcsf-cards' ],   // make sure this depends on your main plugin CSS
+        '1.0'
+    );
+    
+    // JS file
+    wp_enqueue_script(
+        'wcsf-offcanvas',
+        plugins_url( 'assets/js/wcsf-offcanvas.js', __FILE__ ),
+        [ 'jquery' ],
+        '1.0',
+        true
+    );
+  
 
 	wp_add_inline_style( 'wcsf-cards', '
 		.wcsf-sidebar                    { background:#f8f8f8;border-radius:8px;padding:1rem; }
@@ -119,20 +142,58 @@ function wcsf_enqueue_slider_assets() {
 
 
 function wcsf_render_sidebar() {
-    // Check admin setting before rendering
+    // Only output desktop sidebar if enabled in settings
     if ( ! get_option('wcsf_show_category_filter') ) {
-        return; // Don't output filter if disabled
+        return;
     }
-    echo '<aside class="col-12 col-md-3 mb-4 mb-md-0 wcsf-sidebar">';
-    dynamic_sidebar('wcsf_sidebar');
-    wc_get_template(
+
+    // 1) MOBILE “Filters” toolbar (only < md)
+    ?>
+    <nav class="wcsf-mobile-toolbar d-md-none">
+      <button id="wcsf-mobile-filters-btn" class="btn btn-primary w-100">
+        <?php esc_html_e( 'Filters', 'wc-smart-filters' ); ?>
+      </button>
+    </nav>
+    <?php
+
+    // 2) OFF-CANVAS PANEL (only < md)
+    ?>
+    <div class="wcsf-offcanvas-overlay"></div>
+    <aside class="wcsf-offcanvas-panel d-md-none">
+      <button class="wcsf-offcanvas-close">&times;</button>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="m-0"><?php esc_html_e( 'Filters', 'wc-smart-filters' ); ?></h5>
+        <button id="wcsf-clear-filters" class="btn btn-sm btn-link">
+          <?php esc_html_e( 'Clear All', 'wc-smart-filters' ); ?>
+        </button>
+      </div>
+      <?php
+        // our same shared template…
+        wc_get_template(
+          'filter-form.php',
+          [],
+          '',
+          plugin_dir_path( __FILE__ ) . 'templates/'
+        );
+      ?>
+      <button id="wcsf-apply-filters" class="btn btn-primary w-100 mt-3">
+        <?php esc_html_e( 'Apply Filters', 'wc-smart-filters' ); ?>
+      </button>
+    </aside>
+    <?php
+
+    // 3) DESKTOP SIDEBAR (only ≥ md)
+    echo '<aside class="col-12 col-md-3 mb-4 mb-md-0 wcsf-sidebar d-none d-md-block">';
+      dynamic_sidebar('wcsf_sidebar');
+      wc_get_template(
         'filter-form.php',
         [],
         '',
         plugin_dir_path( __FILE__ ) . 'templates/'
-    );
+      );
     echo '</aside>';
 }
+
 
 
 /* ──────────────────────────────────────────── 3. Shop / archive wrappers */
@@ -282,6 +343,7 @@ function wcsf_ajax_filter() {
     $show_rating = (bool) get_option( 'wcsf_show_rating_filter' );
     $show_price  = (bool) get_option( 'wcsf_show_price_filter' );
     $show_search = (bool) get_option( 'wcsf_show_search_box' );
+   
 
     // 4. Sanitize inputs or default
     $cats       = ! empty( $_POST['cats'] )   ? array_map( 'sanitize_text_field', (array) $_POST['cats'] )   : [];
@@ -332,6 +394,21 @@ function wcsf_ajax_filter() {
             'terms'    => $tags,
         ];
     }
+
+      // ───── INSERT HERE ─────
+    // Pull the list of attribute taxonomies the admin selected
+    $attrs = (array) get_option('wcsf_attribute_filter_list', []);
+    foreach ( $attrs as $tax ) {
+        if ( taxonomy_exists( $tax ) && ! empty( $_POST[ $tax ] ) ) {
+            $terms = array_map( 'sanitize_text_field', (array) $_POST[ $tax ] );
+            $tax_query[] = [
+                'taxonomy' => $tax,
+                'field'    => 'slug',
+                'terms'    => $terms,
+            ];
+        }
+    }
+    // ───────────────────────
 
     if ( count( $tax_query ) > 1 ) {
         $args['tax_query'] = $tax_query;
@@ -444,24 +521,32 @@ function wcsf_search_join( $join, $wp_query ) {
 
 
 
-function wcsf_build_pagination( $args ) {
+  function wcsf_build_pagination( $args ) {
+    $total       = max( 1, (int) $args['total'] );
+    $current     = max( 1, (int) $args['current'] );
+    $current_url = $args['url'];
 
-    $total   = max( 1, (int) $args['total']   );
-    $current = max( 1, (int) $args['current'] );
-    $url     = esc_url_raw( $args['url'] );
+    // 1) Remove any existing ?product-page=… from the URL
+    $base_url = remove_query_arg( 'product-page', $current_url );
 
-    // Clean existing pagination
-    $base = preg_replace('#(/page/\d+/|\?product-page=\d+)#', '', $url);
+    // 2) Strip any /page/X/ from the path
+    $base_url = preg_replace( '#/page/\d+(?=/|$)#', '', $base_url );
 
-    if (strpos($base, '/shop/') !== false) {
-        $base = untrailingslashit($base) . '/page/%#%/';
+    // 3) Decide permalink structure:
+    if ( strpos( $base_url, '/shop/' ) !== false ) {
+        // Shop archive—use /page/X/
+        $base   = untrailingslashit( $base_url ) . '/page/%#%/';
         $format = '';
     } else {
-        $format = '?product-page=%#%';
+        // Custom page—use ?product-page=X or &product-page=X
+        $base   = $base_url;
+        $format = ( strpos( $base_url, '?' ) !== false ? '&' : '?' ) . 'product-page=%#%';
     }
 
+    // 4) Generate links
     $links = paginate_links( [
         'base'      => $base . $format,
+        'format'    => '',            // placeholder already in base
         'current'   => $current,
         'total'     => $total,
         'prev_text' => __( '&larr; Prev', 'woocommerce' ),
@@ -469,9 +554,13 @@ function wcsf_build_pagination( $args ) {
         'type'      => 'list',
     ] );
 
-    return $links
-        ? '<nav class="woocommerce-pagination" aria-label="Product pagination">' . $links . '</nav>'
-        : '';
+    if ( ! $links ) {
+        return '';
+    }
+
+    return '<nav class="woocommerce-pagination" aria-label="' . esc_attr__( 'Product pagination', 'woocommerce' ) . '">' 
+         . $links 
+         . '</nav>';
 }
 
 
@@ -507,6 +596,28 @@ add_action('admin_init', function () {
     // Search box
     register_setting( 'wcsf_settings', 'wcsf_show_search_box' );
 
+    register_setting('wcsf_settings', 'wcsf_show_attribute_filter');
+    register_setting('wcsf_settings', 'wcsf_attribute_filter_list');   // array of taxonomy slugs
+    register_setting( 'wcsf_settings', 'wcsf_filter_sort_option' );
+
+     // ← REGISTER YOUR NEW BLOCK‐ORDER SETTING
+     register_setting(
+        'wcsf_settings',
+        'wcsf_filter_block_order',
+        [
+            'sanitize_callback' => function( $input ) {
+                // we expect an array of slug=>position
+                if ( ! is_array($input) ) {
+                    return [];
+                }
+                // cast every value to int, drop negatives
+                return array_map( function($v){
+                    return max( 0, intval($v) );
+                }, $input );
+            },
+            'default' => [],  // default empty array
+        ]
+    );
 });
 
 // 3. Settings Page Output
@@ -662,9 +773,99 @@ function wcsf_settings_page() {
         </td>
         </tr>
 
+        <tr>
+            <th scope="row"><?php esc_html_e('Show Attribute Filters?', 'wc-smart-filters'); ?></th>
+            <td>
+                <input
+                type="checkbox"
+                name="wcsf_show_attribute_filter"
+                value="1"
+                <?php checked( get_option('wcsf_show_attribute_filter') ); ?>
+                />
+                <label><?php esc_html_e('Enable attribute filters?', 'wc-smart-filters'); ?></label>
+            </td>
+            </tr>
+            <tr>
+            <th scope="row"><?php esc_html_e('Which Attributes?', 'wc-smart-filters'); ?></th>
+            <td>
+                <?php
+                // Get all registered product attribute taxonomies
+                $taxonomies = wc_get_attribute_taxonomies();
+                $sel = (array) get_option('wcsf_attribute_filter_list', []);
+                foreach ( $taxonomies as $tax ) {
+                // Convert WC attribute record -> taxonomy name: pa_{slug}
+                $tax_name = wc_attribute_taxonomy_name( $tax->attribute_name );
+                $label    = esc_html( $tax->attribute_label );
+                printf(
+                    '<label style="margin-right:12px;"><input type="checkbox" name="wcsf_attribute_filter_list[]" value="%1$s" %2$s> %3$s</label><br>',
+                    esc_attr( $tax_name ),
+                    checked( in_array( $tax_name, $sel, true ), true, false ),
+                    $label
+                );
+                }
+                ?>
+                <p class="description"><?php esc_html_e('Select which product attributes to show as filters.', 'wc-smart-filters'); ?></p>
+            </td>
+        </tr>
+        <tr>
+            <th scope="row"><?php esc_html_e('Filter Options Sort Order', 'wc-smart-filters'); ?></th>
+            <td>
+                <?php 
+                $current = get_option('wcsf_filter_sort_option', 'name_asc');
+                ?>
+                <select name="wcsf_filter_sort_option">
+                <option value="name_asc"   <?php selected( $current, 'name_asc' );   ?>><?php esc_html_e('Name A → Z','wc-smart-filters'); ?></option>
+                <option value="name_desc"  <?php selected( $current, 'name_desc' );  ?>><?php esc_html_e('Name Z → A','wc-smart-filters'); ?></option>
+                <option value="count_desc" <?php selected( $current, 'count_desc' ); ?>><?php esc_html_e('Count High → Low','wc-smart-filters'); ?></option>
+                <option value="count_asc"  <?php selected( $current, 'count_asc' );  ?>><?php esc_html_e('Count Low → High','wc-smart-filters'); ?></option>
+                </select>
+                <p class="description"><?php esc_html_e('How should your filter checkboxes be ordered?','wc-smart-filters'); ?></p>
+            </td>
+         </tr>
 
-            </table>
-            <?php submit_button(); ?>
+         <?php
+// Build a list of all block slugs & labels
+$blocks = [
+  'categories' => __('Categories','wc-smart-filters'),
+  'brands'     => __('Brands','wc-smart-filters'),
+  'tags'       => __('Tags','wc-smart-filters'),
+  'rating'     => __('Rating','wc-smart-filters'),
+  'search'     => __('Search Box','wc-smart-filters'),
+  'price'      => __('Price Range','wc-smart-filters'),
+];
+// Add any attribute taxonomies
+foreach ( (array) get_option('wcsf_attribute_filter_list',[]) as $tax ) {
+    $blocks[ $tax ] = ucwords( str_replace('_',' ', preg_replace('/^pa_/','',$tax)) );
+}
+
+// Fetch previously saved positions
+$orders = (array) get_option('wcsf_filter_block_order', []);
+?>
+
+<?php foreach ( $blocks as $slug => $label ) : ?>
+  <tr>
+    <th scope="row"><?php echo esc_html( $label ); ?></th>
+    <td>
+      <input
+        type="number"
+        name="wcsf_filter_block_order[<?php echo esc_attr( $slug ); ?>]"
+        value="<?php echo esc_attr( isset( $orders[ $slug ] ) ? $orders[ $slug ] : 0 ); ?>"
+        min="0"
+        style="width:5em;"
+      />
+      <p class="description">
+        <?php esc_html_e( 'Position (1 = first; leave 0 to hide)', 'wc-smart-filters' ); ?>
+      </p>
+    </td>
+  </tr>
+<?php endforeach; ?>
+
+
+        
+
+
+        </table>
+        <?php submit_button(); ?>
         </form>
     </div>
     <?php

@@ -81,5 +81,9 @@ body, .woocommerce { font-family: "Poppins", sans-serif; }
 }
 #filter-tags .filter-tag .remove-tag {
     margin-left: 0.5rem;
+    cursor: pointer;
 }
 
+#filter-tags .filter-tag .remove-tag:hover {
+    text-decoration: underline;
+}

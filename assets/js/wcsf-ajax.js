@@ -16,17 +16,30 @@ jQuery(function ($) {
 
     // 3. Remove filter tag (works for cats and brands) ---------------
     $(document).on('click', '.filter-tag .remove-tag', function(){
-        const name = $(this).data('name');
-        const val  = $(this).data('value');
-        // uncheck checkboxes or clear inputs/selects by name…
-        $(`[name="${name}"][value="${val}"]`).prop('checked', false);
-        // for single-value inputs or selects:
-        if (name === 'min_rating')    $(`select[name="min_rating"]`).val('');
-        if (name === 'search')        $(`input[name="search"]`).val('');
-        if (name === 'min_price')     $('#min_price').val('');
-        if (name === 'max_price')     $('#max_price').val('');
-        fetchProducts(1);
-    });
+      var name = $(this).data('name');
+      var val  = $(this).data('value');
+  
+      if ( name === 'price' ) {
+          // Clear both hidden and visible price inputs
+          $('#min_price, #max_price').val('');
+          $('#min_price_input, #max_price_input').val('');
+      } else {
+          // Uncheck any matching checkbox
+          $(`[name="${name}"][value="${val}"]`).prop('checked', false);
+  
+          // Clear single‐value filters
+          if ( name === 'min_rating' ) {
+              $('select[name="min_rating"]').val('');
+          }
+          if ( name === 'search' ) {
+              $('input[name="search"]').val('');
+          }
+      }
+  
+      // Reload products via AJAX
+      fetchProducts(1);
+  });
+  
 
     // fetchProducts Function -----------------------------------------
     function fetchProducts(page) {
@@ -51,64 +64,88 @@ jQuery(function ($) {
 
     // buildUrlForPage Function (now supports brands too!) ------------
     function buildUrlForPage(page) {
-        const url = new URL(window.location.href);
+      const url = new URL(window.location.href);
     
-        // 1. clean existing params
-        url.searchParams.delete('cats[]');
-        url.searchParams.delete('brands[]');
-        url.searchParams.delete('tags[]');
-        url.searchParams.delete('min_rating');
-        url.searchParams.delete('min_price');
-        url.searchParams.delete('max_price');
-        url.searchParams.delete('search');
-        url.searchParams.delete('product-page');
+      // 1) strip existing /page/X/ and old params…
+      url.pathname = url.pathname.replace(/\/page\/\d+(?=\/|$)/g, '');
+      ['cats[]','brands[]','tags[]','min_rating','min_price','max_price','search','product-page']
+        .forEach(p => url.searchParams.delete(p));
     
-        // 2. re-append array params
-        $('.wc-filter-form input[name="cats[]"]:checked').each(function(){
-          url.searchParams.append('cats[]', $(this).val());
-        });
-        $('.wc-filter-form input[name="brands[]"]:checked').each(function(){
-          url.searchParams.append('brands[]', $(this).val());
-        });
-        $('.wc-filter-form input[name="tags[]"]:checked').each(function(){
-          url.searchParams.append('tags[]', $(this).val());
-        });
+      // 2) re‐append cats, brands, tags as before…
+      $('.wc-filter-form input[name="cats[]"]:checked').each(function(){
+        url.searchParams.append('cats[]', this.value);
+      });
+      $('.wc-filter-form input[name="brands[]"]:checked').each(function(){
+        url.searchParams.append('brands[]', this.value);
+      });
+      $('.wc-filter-form input[name="tags[]"]:checked').each(function(){
+        url.searchParams.append('tags[]', this.value);
+      });
     
-        // 3. single-value params
-        const minRating = $('.wc-filter-form select[name="min_rating"]').val();
-        if (minRating) url.searchParams.set('min_rating', minRating);
+      // 3) rating, price, search…
+      const rating = $('.wc-filter-form select[name="min_rating"]').val();
+      if (rating) url.searchParams.set('min_rating', rating);
     
-        const minPrice = $('#min_price').val();
-        const maxPrice = $('#max_price').val();
-        if (minPrice) url.searchParams.set('min_price', minPrice);
-        if (maxPrice) url.searchParams.set('max_price', maxPrice);
-    
-        const search = $('.wc-filter-form input[name="search"]').val().trim();
-        if (search) url.searchParams.set('search', search);
-    
-        // 4. pagination
-        if (url.pathname.endsWith('/shop/')) {
-          url.pathname = url.pathname.replace(/\/page\/\d+\/$/, '/');
-          if (page > 1) url.pathname += `page/${page}/`;
-        } else {
-          if (page > 1) url.searchParams.set('product-page', page);
+      if ( $('.filter-block--price').length ) {
+        const minP = parseFloat( $('#min_price').val() ),
+              maxP = parseFloat( $('#max_price').val() ),
+              defMin = parseFloat( wcsfPrice.min ),
+              defMax = parseFloat( wcsfPrice.max );
+      
+        // only set if at least one end of the range has changed
+        if ( minP !== defMin || maxP !== defMax ) {
+          url.searchParams.set('min_price', minP);
+          url.searchParams.set('max_price', maxP);
         }
+      }
     
-        return url.toString();
+      const search = $('.wc-filter-form input[name="search"]').val().trim();
+      if (search) url.searchParams.set('search', search);
+    
+      // 4) **Attributes** — loop through the dynamic list
+      // ——— Attributes ———
+      if ( Array.isArray(wcsfAjax.attributeTaxonomies) ) {
+        wcsfAjax.attributeTaxonomies.forEach(function(tax){
+          // clear any old values
+          url.searchParams.delete(tax + '[]');
+          // add each checked attribute term
+          $(`.wc-filter-form input[name="${tax}[]"]:checked`).each(function(){
+            url.searchParams.append(tax + '[]', this.value);
+          });
+        });
+      }
+
+    
+      // 5) pagination (/page/X/ or ?product-page=)
+      if (page > 1) {
+        if (/\/shop\/?$/.test(url.pathname)) {
+          url.pathname = url.pathname.replace(/\/$/, '') + `/page/${page}/`;
+        } else {
+          url.searchParams.set('product-page', page);
+        }
+      }
+    
+      return url.href;
     }
+    
+    
+    
 
     // Render filter tags (now shows brands as well!) -----------------
     function renderFilterTags() {
-        let $tagsContainer = $('#filter-tags');
-        if (!$tagsContainer.length) {
-            $('#wcsf-products').before('<div id="filter-tags" class="mb-3"></div>');
-            $tagsContainer = $('#filter-tags');
-        }
+
+      const urlParams = new URLSearchParams(window.location.search);
+
+      let $tagsContainer = $('#filter-tags');
+      if (!$tagsContainer.length) {
+          $('#wcsf-products').before('<div id="filter-tags" class="mb-3"></div>');
+          $tagsContainer = $('#filter-tags');
+      }
     
-        const tags = [];
+      const tags = [];
     
         // ——— Category tags ———
-        $('.wc-filter-form input[name="cats[]"]:checked').each(function() {
+      $('.wc-filter-form input[name="cats[]"]:checked').each(function() {
             const name = $(this).closest('div').find('label').clone()
                              .children().remove().end()
                              .text().trim();
@@ -118,10 +155,10 @@ jQuery(function ($) {
                 <span data-name="cats[]" data-value="${$(this).val()}"
                       class="remove-tag">&times;</span>
               </span>`);
-        });
+      });
     
         // ——— Brand tags ———
-        $('.wc-filter-form input[name="brands[]"]:checked').each(function() {
+      $('.wc-filter-form input[name="brands[]"]:checked').each(function() {
             const name = $(this).closest('div').find('label').clone()
                              .children().remove().end()
                              .text().trim();
@@ -131,10 +168,10 @@ jQuery(function ($) {
                 <span data-name="brands[]" data-value="${$(this).val()}"
                       class="remove-tag">&times;</span>
               </span>`);
-        });
+      });
     
         // ——— Product Tag tags ———
-        $('.wc-filter-form input[name="tags[]"]:checked').each(function() {
+      $('.wc-filter-form input[name="tags[]"]:checked').each(function() {
             const name = $(this).closest('div').find('label').clone()
                              .children().remove().end()
                              .text().trim();
@@ -144,11 +181,11 @@ jQuery(function ($) {
                 <span data-name="tags[]" data-value="${$(this).val()}"
                       class="remove-tag">&times;</span>
               </span>`);
-        });
+      });
     
         // ——— Rating tag ———
-        const minRating = $('.wc-filter-form select[name="min_rating"]').val();
-        if (minRating) {
+      const minRating = $('.wc-filter-form select[name="min_rating"]').val();
+      if (minRating) {
             tags.push(`
               <span class="filter-tag badge bg-dark text-white me-2">
                 ${minRating}★ & up
@@ -157,18 +194,30 @@ jQuery(function ($) {
               </span>`);
         }
     
-        // ——— Price range tag ———
-        const minPrice = $('#min_price').val();
-        const maxPrice = $('#max_price').val();
-        if (minPrice || maxPrice) {
+      
+        // ——— Price tag ———
+        // ONLY render if the URL actually has a min_price or max_price param
+        if ( $('.filter-block--price').length ) {
+          const defMin = parseFloat( wcsfPrice.min ),
+                defMax = parseFloat( wcsfPrice.max ),
+                minP   = urlParams.has('min_price')
+                           ? parseFloat( urlParams.get('min_price') )
+                           : defMin,
+                maxP   = urlParams.has('max_price')
+                           ? parseFloat( urlParams.get('max_price') )
+                           : defMax;
+        
+          // only render if the user actually changed one of them
+          if ( ( urlParams.has('min_price') && minP !== defMin )
+            || ( urlParams.has('max_price') && maxP !== defMax ) ) {
+        
             tags.push(`
               <span class="filter-tag badge bg-success me-2">
-                ${minPrice} – ${maxPrice}
-                <span data-name="min_price" data-value="${minPrice}"
-                      class="remove-tag">&times;</span>
-                <span data-name="max_price" data-value="${maxPrice}"
-                      class="remove-tag">&times;</span>
-              </span>`);
+                ${minP} – ${maxP}
+                <span data-name="price" class="remove-tag">&times;</span>
+              </span>
+            `);
+          }
         }
     
         // ——— Search tag ———
@@ -181,64 +230,130 @@ jQuery(function ($) {
                       class="remove-tag">&times;</span>
               </span>`);
         }
+
+        if ( Array.isArray(wcsfAjax.attributeTaxonomies) ) {
+          wcsfAjax.attributeTaxonomies.forEach(function(tax){
+            $(`.wc-filter-form input[name="${tax}[]"]:checked`).each(function(){
+              // grab the human label text
+              const label = $(this)
+                .closest('div')
+                .find('label')
+                .clone()
+                .children().remove().end()
+                .text().trim();
+        
+              tags.push(`
+                <span class="filter-tag badge bg-secondary me-2">
+                  ${label}
+                  <span 
+                    data-name="${tax}[]" 
+                    data-value="${this.value}" 
+                    class="remove-tag">&times;
+                  </span>
+                </span>
+              `);
+            });
+          });
+        }
     
         $tagsContainer.html(tags.join(''));
     }
     
 
     // Sync filter tags from URL (supports brands & cats) -------------
-    function renderFilterTagsFromURL() {
-        const urlParams = new URLSearchParams(window.location.search);
+   // function renderFilterTagsFromURL() {
+   //   const urlParams = new URLSearchParams(window.location.search);
+  
     
-        // 1) Uncheck all arrays
-        $('input[name="cats[]"],input[name="brands[]"],input[name="tags[]"]')
-          .prop('checked', false);
-    
-        // 2) Clear single-value selects/inputs
-        $('select[name="min_rating"]').val('');
-        $('input[name="search"]').val('');
-        $('#min_price,#max_price').val('');
-    
-        // 3) Re-apply from URL
-        urlParams.getAll('cats[]').forEach(val => {
-          $(`input[name="cats[]"][value="${val}"]`).prop('checked', true);
-        });
-        urlParams.getAll('brands[]').forEach(val => {
-          $(`input[name="brands[]"][value="${val}"]`).prop('checked', true);
-        });
-        urlParams.getAll('tags[]').forEach(val => {
-          $(`input[name="tags[]"][value="${val}"]`).prop('checked', true);
-        });
-    
-        const minRating = urlParams.get('min_rating');
-        if (minRating) {
-          $('select[name="min_rating"]').val(minRating);
-        }
-    
-        const search = urlParams.get('search');
-        if (search) {
-          $('input[name="search"]').val(search);
-        }
-    
-        const minP = urlParams.get('min_price');
-        const maxP = urlParams.get('max_price');
-        if (minP !== null && maxP !== null) {
-          $('#min_price').val(minP);
-          $('#max_price').val(maxP);
-    
-          // also update your jQuery-UI slider handles:
-          $('#wcsf-price-slider').slider('values', [ parseFloat(minP), parseFloat(maxP) ]);
-          $('#wcsf-price-label').text(`${minP} – ${maxP}`);
-        }
-    
-        // finally build the visual “filter tags” badges:
-        renderFilterTags();
+  
+   //   const minP = urlParams.get('min_price');
+   //   const maxP = urlParams.get('max_price');
+   //   if (minP !== null && maxP !== null) {
+   //      $('#min_price').val(minP);
+   //      $('#max_price').val(maxP);
+   //      $('input[name="min_price"]').val(minP);
+   //      $('input[name="max_price"]').val(maxP);
+  
+          // **only** update the slider if it’s been initialized**
+   //      const $slider = $('#wcsf-price-slider');
+   //      if ( $slider.length && $slider.hasClass('ui-slider') ) {
+   //          $slider.slider('values', [ parseFloat(minP), parseFloat(maxP) ]);
+   //       }
+  
+          // update the label every time
+    //      $('#wcsf-price-label').text(`${minP} – ${maxP}`);
+    //  }
+  
+     // renderFilterTags();
+  //}
+
+  function renderFilterTagsFromURL() {
+    const urlParams = new URLSearchParams(window.location.search);
+  
+    // 1) Reset all filters in the form
+    $('.wc-filter-form')[0]?.reset();
+    // (if you have sliders, reset them manually too)
+    if ( $('#wcsf-price-slider').hasClass('ui-slider') ) {
+      $('#wcsf-price-slider')
+        .slider('values', [ wcsfPrice.min, wcsfPrice.max ]);
+      $('#wcsf-price-label').text(`${wcsfPrice.min} – ${wcsfPrice.max}`);
     }
-    
-    // call on page load
-    jQuery(function($){
-      renderFilterTagsFromURL();
+  
+    // 2) Re-check checkboxes & re-fill single-value controls
+    urlParams.getAll('cats[]').forEach(v => {
+      $(`input[name="cats[]"][value="${v}"]`).prop('checked', true);
     });
+    urlParams.getAll('brands[]').forEach(v => {
+      $(`input[name="brands[]"][value="${v}"]`).prop('checked', true);
+    });
+    urlParams.getAll('tags[]').forEach(v => {
+      $(`input[name="tags[]"][value="${v}"]`).prop('checked', true);
+    });
+    if ( urlParams.has('min_rating') ) {
+      $('select[name="min_rating"]').val(urlParams.get('min_rating'));
+    }
+    if ( urlParams.has('search') ) {
+      $('input[name="search"]').val(urlParams.get('search'));
+    }
+  
+    // 3) Only set price inputs *if* both min_price & max_price
+    //    are present and different from the defaults
+    const minParam = urlParams.get('min_price');
+    const maxParam = urlParams.get('max_price');
+    if ( minParam !== null && maxParam !== null ) {
+      const minP = parseFloat(minParam);
+      const maxP = parseFloat(maxParam);
+      const defMin = parseFloat(wcsfPrice.min);
+      const defMax = parseFloat(wcsfPrice.max);
+  
+      if (
+           ! isNaN(minP) && ! isNaN(maxP)
+        && (minP !== defMin || maxP !== defMax)
+      ) {
+        $('#min_price_input, #min_price').val(minP);
+        $('#max_price_input, #max_price').val(maxP);
+        $('#max_price').val(maxP);
+        if ( $('#wcsf-price-slider').hasClass('ui-slider') ) {
+          $('#wcsf-price-slider').slider('values', [ minP, maxP ]);
+        }
+        $('#wcsf-price-label').text(`${minP} – ${maxP}`);
+      }
+    }
+  
+    // 4) Finally draw the little badge-tags
+    renderFilterTags();
+  }
+  
+
+// call on page load
+//jQuery(function($){
+ // renderFilterTagsFromURL();
+//});
+
+  
+
+
+  
     
 
 });
