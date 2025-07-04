@@ -353,12 +353,15 @@ function wcsf_ajax_filter() {
     $search     = $show_search && isset( $_POST['search'] )
                   ? sanitize_text_field( $_POST['search'] )
                   : '';
+    $default_min = floatval( get_option( 'wcsf_price_filter_min', 0 ) );
+    $default_max = floatval( get_option( 'wcsf_price_filter_max', 1000 ) );
+
     $min_price  = $show_price && isset( $_POST['min_price'] )
                   ? floatval( $_POST['min_price'] )
-                  : 0;
+                  : $default_min;
     $max_price  = $show_price && isset( $_POST['max_price'] )
                   ? floatval( $_POST['max_price'] )
-                  : 0;
+                  : $default_max;
 
     // 5. Base query args
     $args = [
@@ -426,7 +429,7 @@ function wcsf_ajax_filter() {
         ];
     }
 
-    if ( $show_price && ( $min_price > 0 || $max_price > 0 ) ) {
+    if ( $show_price && ( $min_price != $default_min || $max_price != $default_max ) ) {
         $meta_query[] = [
             'key'     => '_price',
             'value'   => [ $min_price, $max_price ],
